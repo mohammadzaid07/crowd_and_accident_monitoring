@@ -37,16 +37,41 @@ last_sms_time = 0
 IST = pytz.timezone('Asia/Kolkata')
 
 # =============================
+# ANTI-SPAM + DUPLICATE CONTROL
+# =============================
+
+SMS_COOLDOWN = 30
+EVENT_COOLDOWN = 15
+
+LAST_EVENT_TIME = {
+    "crowd": 0,
+    "accident": 0
+}
+
+last_crowd_signature = None
+last_accident_signature = None
+
+# =============================
 # INITIALIZE
 # =============================
 
 app = Flask(__name__)
 
-client = MongoClient(MONGO_URI)
-db = client["smart_city"]
-crowd_collection = db["crowd_events"]
-accident_collection = db["accident_events"]
-fs = GridFS(db)
+try:
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
+    client.server_info()
+
+    db = client["smart_city"]
+    crowd_collection = db["crowd_events"]
+    accident_collection = db["accident_events"]
+    fs = GridFS(db)
+
+    DB_CONNECTED = True
+    print("✅ MongoDB Connected")
+
+except:
+    print("⚠️ MongoDB NOT connected. Running without DB.")
+    DB_CONNECTED = False
 
 model = YOLO("yolov8n.pt")        # general detection
 accident_model = YOLO("best.pt")  # accident model
@@ -134,6 +159,7 @@ def generate_frames():
     global accident_start_time, accident_logged
     global last_sound_time
     global last_sms_time
+    global last_crowd_signature, last_accident_signature
 
     while True:
         success, frame = cap.read()
@@ -252,31 +278,35 @@ def generate_frames():
                         winsound.Beep(1500,500)
                         last_sound_time = now
 
-                    if not crowd_logged:
+                    current_signature = (person_count, largest_cluster)
 
-
-                        _, buffer = cv2.imencode(".jpg", frame)
-
-                        file_id = fs.put(
-                            buffer.tobytes(),
-                            filename="crowd_dbscan.jpg",
-                            camera_id=CAMERA_ID,
-                            timestamp=datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
-                        )
-
+                    if (not crowd_logged and
+                        (time.time() - LAST_EVENT_TIME["crowd"] > EVENT_COOLDOWN) and
+                        current_signature != last_crowd_signature):
                         severity = get_crowd_severity(largest_cluster, person_count)
+                        if DB_CONNECTED:
+                            _, buffer = cv2.imencode(".jpg", frame)
 
-                        crowd_collection.insert_one({
-                            "camera_id": CAMERA_ID,
-                            "event_type": "crowd",
-                            "person_count": person_count,
-                            "cluster_size": largest_cluster,
-                            "severity": severity,   # ✅ ADDED
-                            "image_file_id": file_id,
-                            "timestamp": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
-                        })
+                            file_id = fs.put(
+                                buffer.tobytes(),
+                                filename="crowd_dbscan.jpg",
+                                camera_id=CAMERA_ID,
+                                timestamp=datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+                            )
+
+                            
+
+                            crowd_collection.insert_one({
+                                "camera_id": CAMERA_ID,
+                                "event_type": "crowd",
+                                "person_count": person_count,
+                                "cluster_size": largest_cluster,
+                                "severity": severity,   # ✅ ADDED
+                                "image_file_id": file_id,
+                                "timestamp": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+                            })
                         if severity in ["HIGH", "CRITICAL"]:
-                            if time.time() - last_sms_time > 10:
+                            if time.time() - last_sms_time > SMS_COOLDOWN:
                                 send_sms_alert(f"""
                                 CROWD ALERT
                                 Camera: {CAMERA_ID}
@@ -286,7 +316,8 @@ def generate_frames():
                                 """)
                                 last_sms_time = time.time()
                                     
-
+                        LAST_EVENT_TIME["crowd"] = time.time()
+                        last_crowd_signature = current_signature            
                         crowd_logged = True
             else:
                 crowd_start_time = None
@@ -379,38 +410,45 @@ def generate_frames():
                     winsound.Beep(2000,700)
                     last_sound_time = now
 
-                if not accident_logged:
+                current_signature = (accident_type, len(vehicle_boxes))
 
-                    _, buffer = cv2.imencode(".jpg", frame)
-
-                    file_id = fs.put(
-                        buffer.tobytes(),
-                        filename="accident.jpg",
-                        camera_id=CAMERA_ID,
-                        timestamp=datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
-                    )
-
+                if (not accident_logged and
+                    (time.time() - LAST_EVENT_TIME["accident"] > EVENT_COOLDOWN) and
+                    current_signature != last_accident_signature):
                     severity = get_accident_severity(vehicle_boxes, person_boxes, animal_boxes)
 
-                    accident_collection.insert_one({
-                        "camera_id": CAMERA_ID,
-                        "event_type": "accident",
-                        "accident_type": accident_type,
-                        "severity": severity,   # ✅ ADDED
-                        "image_file_id": file_id,
-                        "timestamp": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
-                    })
-                    if severity in ["HIGH", "MEDIUM"]:
-                        last_sms_time = time.time()
-                        send_sms_alert(f"""
-                        ACCIDENT ALERT
-                        Camera: {CAMERA_ID}
-                        Type: {accident_type}
-                        Severity: {severity}
-                        Time: {datetime.now(IST).strftime("%H:%M:%S")}
-                        """)
-                        last_sms_time = time.time()
+                    if DB_CONNECTED:
+                        _, buffer = cv2.imencode(".jpg", frame)
 
+                        file_id = fs.put(
+                            buffer.tobytes(),
+                            filename="accident.jpg",
+                            camera_id=CAMERA_ID,
+                            timestamp=datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+                        )
+
+                        
+
+                        accident_collection.insert_one({
+                            "camera_id": CAMERA_ID,
+                            "event_type": "accident",
+                            "accident_type": accident_type,
+                            "severity": severity,   # ✅ ADDED
+                            "image_file_id": file_id,
+                            "timestamp": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                    if severity in ["HIGH", "MEDIUM"]:
+                        if time.time() - last_sms_time > SMS_COOLDOWN:
+                            send_sms_alert(f"""
+                            ACCIDENT ALERT
+                            Camera: {CAMERA_ID}
+                            Type: {accident_type}
+                            Severity: {severity}
+                            Time: {datetime.now(IST).strftime("%H:%M:%S")}
+                            """)
+                            last_sms_time = time.time()
+                    LAST_EVENT_TIME["accident"] = time.time()
+                    last_accident_signature = current_signature        
                     accident_logged = True
 
         else:
@@ -584,7 +622,14 @@ function loadLogs(){
         <div class="card">
         <h3>👥 Crowd Events</h3>
         <table>
-        <tr><th>Camera</th><th>Count</th><th>Severity</th></tr>
+        <tr>
+            <th>Camera</th>
+            <th>Count</th>
+            <th>Cluster</th>
+            <th>Severity</th>
+            <th>Time</th>
+            <th>Image</th>
+        </tr>
         `;
 
         data.crowd.slice(0,10).forEach(e => {
@@ -592,7 +637,12 @@ function loadLogs(){
             <tr>
                 <td>${e.camera_id}</td>
                 <td>${e.person_count}</td>
+                <td>${e.cluster_size}</td>
                 <td><span class="badge ${getBadgeClass(e.severity)}">${e.severity}</span></td>
+                <td>${e.timestamp}</td>
+                <td>
+                    <a href="/image/${e.image_file_id}" target="_blank">View</a>
+                </td>
             </tr>`;
         });
 
@@ -603,7 +653,13 @@ function loadLogs(){
         <div class="card">
         <h3>🚨 Accident Events</h3>
         <table>
-        <tr><th>Camera</th><th>Type</th><th>Severity</th></tr>
+        <tr>
+            <th>Camera</th>
+            <th>Type</th>
+            <th>Severity</th>
+            <th>Time</th>
+            <th>Image</th>
+        </tr>
         `;
 
         data.accident.slice(0,10).forEach(e => {
@@ -612,6 +668,10 @@ function loadLogs(){
                 <td>${e.camera_id}</td>
                 <td>${e.accident_type}</td>
                 <td><span class="badge ${getBadgeClass(e.severity)}">${e.severity}</span></td>
+                <td>${e.timestamp}</td>
+                <td>
+                    <a href="/image/${e.image_file_id}" target="_blank">View</a>
+                </td>
             </tr>`;
         });
 
@@ -634,8 +694,10 @@ def video_feed():
 
 @app.route('/logs')
 def logs():
-    crowd_events = list(crowd_collection.find().sort("_id", -1))
-    accident_events = list(accident_collection.find().sort("_id", -1))
+    if not DB_CONNECTED:
+        return jsonify({"crowd": [], "accident": []})
+    crowd_events = list(crowd_collection.find().sort("_id", -1).limit(50))
+    accident_events = list(accident_collection.find().sort("_id", -1).limit(50))
 
     for e in crowd_events:
         e["_id"] = str(e["_id"])
