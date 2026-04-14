@@ -23,7 +23,7 @@ import io
 
 MONGO_URI = os.getenv("MONGO_URI")
 CAMERA_ID = "CAM01"
-STREAM_URL = "http://172.20.10.4:8000/video"
+STREAM_URL = "http://172.20.10.2:8000/video"
 
 # VIDEO_PATH = "test_video.mp4"
 

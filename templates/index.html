@@ -1,0 +1,348 @@
+<!-- templates/index.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>CMADS Dashboard</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    font-family:Segoe UI, Arial, sans-serif;
+    background:#0f172a;
+    color:white;
+}
+
+/* HEADER */
+.header{
+    background:#020617;
+    padding:18px;
+    text-align:center;
+    font-size:28px;
+    font-weight:bold;
+    border-bottom:2px solid #1e293b;
+    letter-spacing:1px;
+}
+
+/* MAIN */
+.container{
+    display:grid;
+    grid-template-columns:2fr 1fr;
+    gap:20px;
+    padding:20px;
+}
+
+/* CARD */
+.card{
+    background:#1e293b;
+    border-radius:14px;
+    padding:15px;
+    box-shadow:0 6px 18px rgba(0,0,0,0.35);
+}
+
+/* VIDEO */
+.video-box img{
+    width:100%;
+    border-radius:12px;
+    border:2px solid #334155;
+}
+
+/* BUTTONS */
+.controls{
+    margin-bottom:15px;
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+}
+
+button{
+    background:#3b82f6;
+    color:white;
+    border:none;
+    padding:10px 18px;
+    border-radius:8px;
+    cursor:pointer;
+    font-weight:600;
+    transition:0.2s;
+}
+
+button:hover{
+    background:#2563eb;
+    transform:translateY(-1px);
+}
+
+/* STATS */
+.stats{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+    margin-bottom:15px;
+}
+
+.stat-box{
+    background:#334155;
+    padding:12px;
+    border-radius:10px;
+    text-align:center;
+}
+
+.stat-value{
+    font-size:22px;
+    font-weight:bold;
+    margin-top:5px;
+}
+
+/* LOG SECTION */
+#logs{
+    display:none;
+}
+
+.log-card{
+    background:#0f172a;
+    border-radius:12px;
+    padding:12px;
+    margin-bottom:15px;
+    max-height:350px;
+    overflow-y:auto;
+    border:1px solid #334155;
+}
+
+h3{
+    margin-bottom:10px;
+    color:#f8fafc;
+}
+
+/* TABLE */
+table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:14px;
+}
+
+th{
+    background:#334155;
+    padding:10px;
+    position:sticky;
+    top:0;
+}
+
+td{
+    padding:8px;
+    border-bottom:1px solid #475569;
+    text-align:center;
+}
+
+/* BADGES */
+.badge{
+    padding:5px 10px;
+    border-radius:8px;
+    font-weight:bold;
+    font-size:12px;
+}
+
+.low{background:#16a34a;}
+.medium{background:#2563eb;}
+.high{background:#ea580c;}
+.critical{background:#dc2626;}
+
+/* FOOTER */
+.footer{
+    text-align:center;
+    padding:12px;
+    color:#94a3b8;
+    font-size:14px;
+}
+
+/* RESPONSIVE */
+@media(max-width:1000px){
+    .container{
+        grid-template-columns:1fr;
+    }
+}
+
+@media(max-width:600px){
+    .header{
+        font-size:22px;
+    }
+
+    table{
+        font-size:12px;
+    }
+
+    button{
+        width:100%;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+🚦 Crowd Monitoring and Accident Detection System
+</div>
+
+<div class="container">
+
+    <!-- LEFT SIDE -->
+    <div class="card">
+
+        <h2 style="margin-bottom:15px;">📷 Live Camera Feed</h2>
+
+        <div class="video-box">
+            <img src="/video_feed" alt="Live Feed">
+        </div>
+
+    </div>
+
+    <!-- RIGHT SIDE -->
+    <div class="card">
+
+        <div class="stats">
+            <div class="stat-box">
+                Crowd Events
+                <div class="stat-value" id="crowdCount">0</div>
+            </div>
+
+            <div class="stat-box">
+                Accident Events
+                <div class="stat-value" id="accidentCount">0</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button onclick="toggleLogs()">Show / Hide Logs</button>
+            <button onclick="loadLogs()">Refresh Logs</button>
+        </div>
+
+        <div id="logs"></div>
+
+    </div>
+
+</div>
+
+<div class="footer">
+CMADS Dashboard • Real-Time Monitoring
+</div>
+
+<script>
+let visible = false;
+let intervalId = null;
+
+function toggleLogs(){
+    const logs = document.getElementById("logs");
+
+    visible = !visible;
+
+    if(visible){
+        logs.style.display = "block";
+        loadLogs();
+        intervalId = setInterval(loadLogs, 3000);
+    }else{
+        logs.style.display = "none";
+        clearInterval(intervalId);
+    }
+}
+
+function badgeClass(severity){
+    if(!severity) return "low";
+    return severity.toLowerCase();
+}
+
+function loadLogs(){
+
+    fetch("/logs")
+    .then(response => response.json())
+    .then(data => {
+
+        document.getElementById("crowdCount").innerText = data.crowd.length;
+        document.getElementById("accidentCount").innerText = data.accident.length;
+
+        let crowdHTML = `
+        <div class="log-card">
+        <h3>👥 Crowd Events</h3>
+        <table>
+        <tr>
+            <th>Camera</th>
+            <th>Count</th>
+            <th>Cluster</th>
+            <th>Severity</th>
+            <th>Time</th>
+            <th>Image</th>
+        </tr>
+        `;
+
+        data.crowd.slice(0,10).forEach(item => {
+            crowdHTML += `
+            <tr>
+                <td>${item.camera_id}</td>
+                <td>${item.person_count}</td>
+                <td>${item.cluster_size}</td>
+                <td>
+                    <span class="badge ${badgeClass(item.severity)}">
+                        ${item.severity}
+                    </span>
+                </td>
+                <td>${item.timestamp}</td>
+                <td>
+                    <a href="/image/${item.image_file_id}" target="_blank" style="color:#60a5fa;">View</a>
+                </td>
+            </tr>
+            `;
+        });
+
+        crowdHTML += `</table></div>`;
+
+
+        let accidentHTML = `
+        <div class="log-card">
+        <h3>🚨 Accident Events</h3>
+        <table>
+        <tr>
+            <th>Camera</th>
+            <th>Type</th>
+            <th>Severity</th>
+            <th>Time</th>
+            <th>Image</th>
+        </tr>
+        `;
+
+        data.accident.slice(0,10).forEach(item => {
+            accidentHTML += `
+            <tr>
+                <td>${item.camera_id}</td>
+                <td>${item.accident_type}</td>
+                <td>
+                    <span class="badge ${badgeClass(item.severity)}">
+                        ${item.severity}
+                    </span>
+                </td>
+                <td>${item.timestamp}</td>
+                <td>
+                    <a href="/image/${item.image_file_id}" target="_blank" style="color:#60a5fa;">View</a>
+                </td>
+            </tr>
+            `;
+        });
+
+        accidentHTML += `</table></div>`;
+
+        document.getElementById("logs").innerHTML =
+            crowdHTML + accidentHTML;
+    })
+    .catch(error => {
+        console.log("Error:", error);
+    });
+}
+</script>
+
+</body>
+</html>
